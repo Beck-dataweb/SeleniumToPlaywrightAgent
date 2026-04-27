@@ -1,0 +1,26 @@
+{
+  "name": "seleniumtoplaywrightagent",
+  "version": "1.0.0",
+  "description": "GitHub agent that converts Selenium tests to Playwright",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Beck-dataweb/SeleniumToPlaywrightAgent.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/Beck-dataweb/SeleniumToPlaywrightAgent/issues"
+  },
+  "homepage": "https://github.com/Beck-dataweb/SeleniumToPlaywrightAgent#readme",
+  "dependencies": {
+    "@octokit/rest": "^22.0.1",
+    "express": "^5.2.1"
+  }
+}
