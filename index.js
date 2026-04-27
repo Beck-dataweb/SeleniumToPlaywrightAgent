@@ -9,7 +9,6 @@ const octokit = new Octokit({
 });
 
 // ─── Conversion Rules ────────────────────────────────────────────────────────
-// Converts Selenium Java patterns to Playwright Java patterns
 function convertToPlaywright(code) {
   return code
     // imports
@@ -51,7 +50,7 @@ function convertToPlaywright(code) {
     .replace(/Thread\.sleep\(\d+\);/g, '// [converted] use page.waitForSelector() or Playwright auto-wait instead')
     .replace(/new WebDriverWait.+?;/g, '// [converted] Playwright has built-in auto-waiting')
 
-    // assertions (TestNG → Playwright assertions)
+    // assertions
     .replace(/Assert\.assertEquals\((.+?),\s*(.+?)\)/g, 'assertThat($1).hasText($2)')
     .replace(/Assert\.assertTrue\((.+?)\)/g, 'assertThat($1).isVisible()')
 
@@ -61,9 +60,10 @@ function convertToPlaywright(code) {
 }
 
 // ─── Read a file from GitHub ─────────────────────────────────────────────────
+// Uses direct URL string to avoid Octokit v22 encoding slashes as %2F
 async function readFileFromRepo(owner, repo, filePath) {
   try {
-    const response = await octokit.repos.getContent({ owner, repo, path: filePath });
+    const response = await octokit.request(`GET /repos/${owner}/${repo}/contents/${filePath}`);
     const content = Buffer.from(response.data.content, "base64").toString("utf-8");
     return { success: true, content, sha: response.data.sha };
   } catch (err) {
@@ -74,19 +74,15 @@ async function readFileFromRepo(owner, repo, filePath) {
 // ─── Write a converted file to GitHub ────────────────────────────────────────
 async function writeFileToRepo(owner, repo, filePath, content, message) {
   try {
-    // Check if file already exists (need SHA to update)
     let sha;
     try {
-      const existing = await octokit.repos.getContent({ owner, repo, path: filePath });
+      const existing = await octokit.request(`GET /repos/${owner}/${repo}/contents/${filePath}`);
       sha = existing.data.sha;
     } catch (_) {
-      // File does not exist yet — that is fine
+      // File does not exist yet — fine
     }
 
-    await octokit.repos.createOrUpdateFileContents({
-      owner,
-      repo,
-      path: filePath,
+    await octokit.request(`PUT /repos/${owner}/${repo}/contents/${filePath}`, {
       message,
       content: Buffer.from(content).toString("base64"),
       ...(sha ? { sha } : {})
@@ -100,45 +96,31 @@ async function writeFileToRepo(owner, repo, filePath, content, message) {
 
 // ─── Routes ──────────────────────────────────────────────────────────────────
 
-// Health check
 app.get("/", (req, res) => {
   res.json({ status: "Agent is running", usage: "POST /copilot or POST /convert" });
 });
 
-// Simple chat-style endpoint
 app.post("/copilot", async (req, res) => {
   console.log("REQUEST /copilot:", req.body);
   const message = req.body.message || "";
-
   if (message.includes("convert")) {
     return res.json({
       response: "Use POST /convert with { owner, repo, filePath, targetOwner, targetRepo, targetPath }"
     });
   }
-
   res.json({ response: "Agent is running. Try: POST /convert" });
 });
 
-// Real conversion endpoint:
-// Reads a Selenium Java file from sourceRepo, converts it, writes to targetRepo
 app.post("/convert", async (req, res) => {
   console.log("REQUEST /convert:", req.body);
 
-  const {
-    owner,        // source repo owner
-    repo,         // source repo name
-    filePath,     // path to Selenium Java file in source repo
-    targetOwner,  // target repo owner (for Playwright output)
-    targetRepo,   // target repo name
-    targetPath    // path to write converted file in target repo
-  } = req.body;
+  const { owner, repo, filePath, targetOwner, targetRepo, targetPath } = req.body;
 
-  // Validate required fields
   if (!owner || !repo || !filePath) {
     return res.status(400).json({ error: "owner, repo, and filePath are required" });
   }
 
-  // Step 1: read source file
+  // Step 1: read
   const source = await readFileFromRepo(owner, repo, filePath);
   if (!source.success) {
     return res.status(500).json({ error: "Failed to read source file", detail: source.error });
@@ -147,13 +129,10 @@ app.post("/convert", async (req, res) => {
   // Step 2: convert
   const converted = convertToPlaywright(source.content);
 
-  // Step 3: write to target repo if provided, otherwise just return converted code
+  // Step 3: write to target repo if provided, otherwise return converted code
   if (targetOwner && targetRepo && targetPath) {
     const write = await writeFileToRepo(
-      targetOwner,
-      targetRepo,
-      targetPath,
-      converted,
+      targetOwner, targetRepo, targetPath, converted,
       `migrate: convert ${filePath} from Selenium to Playwright`
     );
     if (!write.success) {
@@ -162,11 +141,10 @@ app.post("/convert", async (req, res) => {
     return res.json({
       success: true,
       message: `Converted and committed to ${targetOwner}/${targetRepo}/${targetPath}`,
-      preview: converted.substring(0, 500) + (converted.length > 500 ? "\n... (truncated)" : "")
+      preview: converted.substring(0, 800) + (converted.length > 800 ? "\n...(truncated)" : "")
     });
   }
 
-  // Return converted code only (no write)
   res.json({ success: true, converted });
 });
 
